@@ -1,0 +1,30 @@
+plugins {
+	id 'org.springframework.boot' version '2.1.9.RELEASE'
+	id 'io.spring.dependency-management' version '1.0.8.RELEASE'
+	id 'java'
+}
+
+group = 'com.navis'
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = '1.8'
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+//	mavenCentral()
+	jcenter()
+}
+
+dependencies {
+	compile 'com.omarsmak.kafka:consumer-lag-monitoring:0.0.3'
+	compile('org.springframework.boot:spring-boot-starter-web') {
+		exclude module : 'spring-boot-starter-logging'
+	}
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
