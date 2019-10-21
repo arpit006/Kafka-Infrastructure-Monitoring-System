@@ -18,13 +18,52 @@ repositories {
 //	mavenCentral()
 	jcenter()
 }
+apply plugin: 'groovy'
+
+//To create Zip file
+apply plugin: 'application'
+mainClassName = 'com.navis.consumerlagmonitoring.ConsumerLagMonitoringApplication'
+bootDistTar.enabled = false
+distTar.enabled = false
+distZip.enabled = false
 
 dependencies {
 	compile 'com.omarsmak.kafka:consumer-lag-monitoring:0.0.3'
 	compile('org.springframework.boot:spring-boot-starter-web') {
 		exclude module : 'spring-boot-starter-logging'
 	}
+	compile('org.springframework.boot:spring-boot-starter-log4j2')
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+task myZip(type: Zip) {
+	from '/consumer-lag-monitoring/'
+	include '*'
+	archiveName 'KafkaMonitoring.zip'
+	destinationDir(file('/distributions'))
+}
+
+task createCustomPropertiesFile() {
+	def text = "consumer.group.names=n4_snapshot_consumer13,bimonitor_consumer13,bi_consumer_agg_consumer13\n" +
+			"\n" +
+			"kafka.servers=10.43.131.185:9092"
+
+	def config = file("$buildDir/config")
+	outputs.dir config
+	doLast {
+		config.mkdirs()
+		new File(config, 'override_app.properties').write(text)
+	}
+}
+
+distributions{
+	boot{
+		contents{
+			from(createCustomPropertiesFile) {
+				into 'config/'
+			}
+		}
+	}
 }
