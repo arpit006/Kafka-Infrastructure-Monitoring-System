@@ -2,6 +2,7 @@ package com.navis.consumerlagmonitoring.service;
 
 import com.navis.consumerlagmonitoring.bean.Offsets;
 import com.navis.consumerlagmonitoring.config.ConsumerGroupsConfig;
+import com.navis.consumerlagmonitoring.exception.GroupNotFoundException;
 import com.navis.consumerlagmonitoring.vo.ConsumerGroup;
 import com.navis.consumerlagmonitoring.vo.Partition;
 import com.navis.consumerlagmonitoring.vo.Topic;
@@ -9,6 +10,8 @@ import com.omarsmak.kafka.consumer.lag.monitoring.client.KafkaConsumerLagClient;
 import com.omarsmak.kafka.consumer.lag.monitoring.client.KafkaConsumerLagClientFactory;
 import com.omarsmak.kafka.consumer.lag.monitoring.client.data.Lag;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -26,34 +29,58 @@ import java.util.Set;
 @Service
 public class ConsumerMonitoringService implements IConsumerMonitoringService {
 
+    private static final Logger LOGGER = LogManager.getLogger(ConsumerMonitoringService.class);
+
     Comparator<ConsumerGroup> comparator = Comparator.comparing(t -> t.getTopic().get(0).getPartition().get(0).getPartition());
+
     @Value("${kafka.servers}")
     private String kafkaServer;
+
     private List<ConsumerGroup> consumerGroupList = new ArrayList<>();
+
     @Autowired
     private ConsumerGroupsConfig consumerGroupsConfig;
+
     private Map<String, Map<String, Map<Integer, Offsets>>> groupTopicPartitionOffsetMap = new HashMap<>();
 
     private long count = 0L;
 
+    private long prevProducerSum;
+
+    private long prevConsumerSum;
+
+    /**
+     * Scheduled Job to get Details of all the consumer groups
+     */
     @Scheduled(fixedRate = 60000)
     public void getConsumerDescription() {
         ++count;
         Set<String> set = consumerGroupsConfig.getConsumerGroupSet();
         List<ConsumerGroup> result = new ArrayList<>();
         for (String cgs : set) {
-            Map<String, Map<Integer, Offsets>> topicPartitionOffsetMap = groupTopicPartitionOffsetMap.computeIfAbsent(cgs, k -> new HashMap<>());
-            result.add(getConsumerDescriptionForEachConsumerGroup(cgs, topicPartitionOffsetMap));
+            try {
+                Map<String, Map<Integer, Offsets>> topicPartitionOffsetMap = groupTopicPartitionOffsetMap.computeIfAbsent(cgs, k -> new HashMap<>());
+                result.add(getConsumerDescriptionForEachConsumerGroup(cgs, topicPartitionOffsetMap));
+            } catch (GroupNotFoundException e) {
+                LOGGER.error("The Kafka Consumer '" + cgs + "' you are trying to monitor does not exist in Kafka Cluster." +
+                        " Hence, No information for this Consumer Group will be provided.");
+            }
         }
         consumerGroupList = new ArrayList<>();
         consumerGroupList.addAll(result);
     }
 
-    private ConsumerGroup getConsumerDescriptionForEachConsumerGroup(String inConsumerGroupName, Map<String, Map<Integer, Offsets>> topicPartitionOffsetMap) {
+    private ConsumerGroup getConsumerDescriptionForEachConsumerGroup(String inConsumerGroupName,
+                                                                     Map<String, Map<Integer, Offsets>> inTopicPartitionOffsetMap) throws GroupNotFoundException {
         Properties properties = new Properties();
         properties.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaServer);
         final KafkaConsumerLagClient kafkaConsumerLagClient = KafkaConsumerLagClientFactory.create(properties);
-        List<Lag> consumerLag = kafkaConsumerLagClient.getConsumerLag(inConsumerGroupName);
+        List<Lag> consumerLag;
+        try {
+            consumerLag = kafkaConsumerLagClient.getConsumerLag(inConsumerGroupName);
+        } catch (Exception e) {
+            throw new GroupNotFoundException();
+        }
         ConsumerGroup cg = new ConsumerGroup();
         cg.setConsumerGroupName(inConsumerGroupName);
         List<Topic> topics = new ArrayList<>();
@@ -70,7 +97,7 @@ public class ConsumerMonitoringService implements IConsumerMonitoringService {
             topic.setTopicName(l.getTopicName());
             List<Partition> partitions = new ArrayList<>();
             Comparator<Partition> comparator = Comparator.comparing(Partition::getPartition);
-            Map<Integer, Offsets> partitionOffsetMap = topicPartitionOffsetMap.computeIfAbsent(l.getTopicName(), k -> new HashMap<>());
+            Map<Integer, Offsets> partitionOffsetMap = inTopicPartitionOffsetMap.computeIfAbsent(l.getTopicName(), k -> new HashMap<>());
             for (Integer key : keys) {
                 Partition partition = new Partition();
                 Offsets offset;
@@ -97,17 +124,15 @@ public class ConsumerMonitoringService implements IConsumerMonitoringService {
                 long latestTimeInMillis = System.currentTimeMillis();
 
                 if (diffProducerOffset == 0L) {
-                    isProducerActive = isProducerActive || false;
                     partition.setIsProducerActive("INACTIVE");
                 } else {
-                    isProducerActive = isProducerActive || true;
+                    isProducerActive = true;
                     partition.setIsProducerActive("ACTIVE");
                 }
                 if (diffConsumerOffset == 0L) {
-                    isConsumerActive = isConsumerActive || false;
                     partition.setIsConsumerActive("INACTIVE");
                 } else {
-                    isConsumerActive = isConsumerActive || true;
+                    isConsumerActive = true;
                     partition.setIsConsumerActive("ACTIVE");
                 }
 
@@ -126,10 +151,15 @@ public class ConsumerMonitoringService implements IConsumerMonitoringService {
                 partition.setAverageWriteSpeed(avgProducerSpeed);
                 partition.setAverageReadSpeed(avgConsumerSpeed);
                 partitions.add(partition);
-                Offsets newOffset = new Offsets(latestConsumerOffsetMap.get(key), latestPartitionOffsetMap.get(key), new Date(), new Date(), avgProducerSpeed, avgConsumerSpeed);
+                Offsets newOffset = new Offsets(latestConsumerOffsetMap.get(key),
+                        latestPartitionOffsetMap.get(key),
+                        new Date(),
+                        new Date(),
+                        avgProducerSpeed,
+                        avgConsumerSpeed);
                 partitionOffsetMap.put(key, newOffset);
             }
-            topicPartitionOffsetMap.put(l.getTopicName(), partitionOffsetMap);
+            inTopicPartitionOffsetMap.put(l.getTopicName(), partitionOffsetMap);
             partitions.sort(comparator);
             topic.setPartition(partitions);
             topic.setTotalLag(l.getTotalLag());

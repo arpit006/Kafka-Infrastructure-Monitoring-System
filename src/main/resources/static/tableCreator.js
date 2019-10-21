@@ -1,5 +1,5 @@
 function buildHtmlTable(selector) {
-    $.get("http://localhost:8365/monitor",function(data,status){
+    $.get("/monitor",function(data,status){
         for (var i = 0; i < data.length; i++) {
             var div$ = $('<div>');
             var header$ = $('<h2 align="center"/>');

@@ -8,8 +8,12 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class ConsumerLagMonitoringApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(ConsumerLagMonitoringApplication.class, args);
+	/**
+	 * Main method which gets called by the spring
+	 * @param inArgs String
+	 */
+	public static void main(String[] inArgs) {
+		SpringApplication.run(ConsumerLagMonitoringApplication.class, inArgs);
 	}
 
 }
